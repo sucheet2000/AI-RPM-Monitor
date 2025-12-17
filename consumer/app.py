@@ -11,7 +11,6 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request
 from consumer.models import db, VitalsRecord, LLMSummary
-from consumer.models import db, VitalsRecord, LLMSummary
 from consumer.kafka_consumer import VitalsConsumer
 from dotenv import load_dotenv
 from flask_cors import CORS
@@ -44,7 +43,7 @@ def create_app(config_name=None):
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'consumer-secret-key')
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
         'DATABASE_URL',
-        'postgresql://rpm_user:rpm_password@localhost:5432/rpm_db'
+        'postgresql://rpm_user:CHANGE_ME@localhost:5432/rpm_db'
     )
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
