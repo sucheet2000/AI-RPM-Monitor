@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import HomePage from './pages/HomePage';
 import Dashboard from './pages/Dashboard';
 
 function App() {
@@ -9,8 +10,8 @@ function App() {
     return (
         <Router>
             <Routes>
-                {/* Redirect base URL to the default patient's dashboard */}
-                <Route path="/" element={<Navigate replace to={`/dashboard/${DEFAULT_PATIENT_ID}`} />} />
+                {/* Landing Page */}
+                <Route path="/" element={<HomePage />} />
 
                 {/* Main Dashboard View */}
                 <Route path="/dashboard/:patientId" element={<Dashboard />} />
