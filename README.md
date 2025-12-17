@@ -261,5 +261,5 @@ MIT License — See [LICENSE](LICENSE) for details.
 ---
 
 <div align="center">
-  <sub>Built with ❤️ for modern healthcare monitoring</sub>
+  <sub></sub>
 </div>
