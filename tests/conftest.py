@@ -2,7 +2,7 @@
 Pytest configuration and fixtures.
 """
 import pytest
-from app import create_app, db
+from consumer.app import create_app, db
 
 
 @pytest.fixture

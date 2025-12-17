@@ -11,12 +11,13 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request
 from consumer.models import db, VitalsRecord, LLMSummary
-from consumer.kafka_consumer import VitalsConsumer
+from consumer.kafka_consumer_ORIGINAL import VitalsConsumer
 from dotenv import load_dotenv
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit, join_room
 
-# Load environment variables from .env file
-load_dotenv()
+# Set up global SocketIO instance (init later)
+socketio = SocketIO()
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +39,9 @@ def create_app(config_name=None):
     """
     app = Flask(__name__)
     CORS(app)  # Enable CORS for all routes
+    
+    # Initialize SocketIO
+    socketio.init_app(app, cors_allowed_origins="*", async_mode='eventlet')
     
     # Configuration
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'consumer-secret-key')
@@ -81,28 +85,16 @@ def register_routes(app: Flask) -> None:
     @app.route('/api/vitals/<patient_id>', methods=['GET'])
     def get_patient_vitals(patient_id: str):
         """
-        Get vital records for a patient from the last 24 hours.
-        
-        Args:
-            patient_id: The patient identifier.
-            
-        Query Parameters:
-            hours: Optional, number of hours to look back (default: 24).
-            limit: Optional, maximum records to return (default: 100).
-            
-        Returns:
-            JSON array of vital records.
+        Get vital signs for a patient using robust serialization.
         """
         try:
             # Parse query parameters
             hours = request.args.get('hours', 24, type=int)
             limit = request.args.get('limit', 100, type=int)
             
-            # Validate parameters
-            hours = max(1, min(hours, 168))  # 1 hour to 7 days
+            hours = max(1, min(hours, 168))
             limit = max(1, min(limit, 1000))
             
-            # Calculate time threshold
             time_threshold = datetime.utcnow() - timedelta(hours=hours)
             
             # Query database
@@ -113,11 +105,14 @@ def register_routes(app: Flask) -> None:
                 VitalsRecord.reading_timestamp.desc()
             ).limit(limit).all()
             
+            # Serialize using list comprehension calling .to_dict()
+            results = [record.to_dict() for record in records]
+            
             return jsonify({
                 'patient_id': patient_id,
                 'period_hours': hours,
-                'count': len(records),
-                'records': [record.to_dict() for record in records]
+                'count': len(results),
+                'records': results
             })
             
         except Exception as e:
@@ -129,48 +124,25 @@ def register_routes(app: Flask) -> None:
     
     @app.route('/api/alerts/<patient_id>', methods=['GET'])
     def get_patient_alerts(patient_id: str):
-        """
-        Get all Critical alerts for a patient.
-        
-        Args:
-            patient_id: The patient identifier.
-            
-        Query Parameters:
-            limit: Optional, maximum records to return (default: 50).
-            since: Optional, ISO timestamp to filter from.
-            
-        Returns:
-            JSON array of critical vital records.
-        """
+        """Get all Critical alerts for a patient."""
         try:
-            # Parse query parameters
             limit = request.args.get('limit', 50, type=int)
             since = request.args.get('since', None, type=str)
-            
-            # Validate limit
             limit = max(1, min(limit, 500))
             
-            # Build query
             query = VitalsRecord.query.filter(
                 VitalsRecord.patient_id == patient_id,
                 VitalsRecord.state_classified == 'Critical'
             )
             
-            # Apply since filter if provided
             if since:
                 try:
                     since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
                     query = query.filter(VitalsRecord.reading_timestamp >= since_dt)
                 except ValueError:
-                    return jsonify({
-                        'error': 'Invalid timestamp format',
-                        'message': 'Use ISO 8601 format (e.g., 2024-01-01T00:00:00Z)'
-                    }), 400
+                    pass
             
-            # Execute query
-            records = query.order_by(
-                VitalsRecord.reading_timestamp.desc()
-            ).limit(limit).all()
+            records = query.order_by(VitalsRecord.reading_timestamp.desc()).limit(limit).all()
             
             return jsonify({
                 'patient_id': patient_id,
@@ -178,24 +150,14 @@ def register_routes(app: Flask) -> None:
                 'count': len(records),
                 'alerts': [record.to_dict() for record in records]
             })
-            
         except Exception as e:
-            logger.error(f"Error fetching alerts for {patient_id}: {e}")
-            return jsonify({
-                'error': 'Internal server error',
-                'message': str(e)
-            }), 500
-    
+            logger.error(f"Error fetching alerts: {e}")
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/summaries/<patient_id>', methods=['GET'])
     def get_patient_summaries(patient_id: str):
         """
         Get LLM-generated summaries for a patient.
-        
-        Args:
-            patient_id: The patient identifier.
-            
-        Returns:
-            JSON array of LLM summaries.
         """
         try:
             limit = request.args.get('limit', 10, type=int)
@@ -207,10 +169,13 @@ def register_routes(app: Flask) -> None:
                 LLMSummary.created_at.desc()
             ).limit(limit).all()
             
+            # Serialize using list comprehension calling .to_dict()
+            results = [s.to_dict() for s in summaries]
+            
             return jsonify({
                 'patient_id': patient_id,
-                'count': len(summaries),
-                'summaries': [s.to_dict() for s in summaries]
+                'count': len(results),
+                'summaries': results
             })
             
         except Exception as e:
@@ -257,7 +222,7 @@ def register_routes(app: Flask) -> None:
 
 def message_handler(app: Flask):
     """
-    Create a message handler that persists to database with At-Least-Once semantics.
+    Create a message handler that persists to database and emits via SocketIO.
     
     The handler writes the vital record and LLM summary (for critical readings)
     to the database, then commits the Kafka offset only after both writes succeed.
@@ -283,19 +248,20 @@ def message_handler(app: Flask):
         """
         with app.app_context():
             try:
-                # Parse timestamp
-                reading_ts = datetime.fromisoformat(
-                    data['timestamp'].replace('Z', '+00:00')
-                )
+                # --- STEP 1: Parse content ---
+                patient_id = data.get('patient_id')
+                device_id = data.get('device_id')
+                reading_ts = datetime.fromisoformat(data['timestamp'].replace('Z', '+00:00'))
+                vitals = data.get('vitals', {})
                 
-                # --- STEP 1: Create and persist VitalsRecord ---
+                # --- STEP 2: Save VitalsRecord ---
                 record = VitalsRecord(
-                    patient_id=data['patient_id'],
-                    device_id=data.get('device_id'),
-                    heart_rate=data['vitals']['heart_rate'],
-                    spo2=data['vitals']['spo2'],
-                    temperature=data['vitals']['temperature'],
-                    state_classified=data['state_classified'],
+                    patient_id=patient_id,
+                    device_id=device_id,
+                    heart_rate=vitals.get('heart_rate'),
+                    spo2=vitals.get('spo2'),
+                    temperature=vitals.get('temperature'),
+                    state_classified=data.get('state_classified', 'Normal'),
                     reading_timestamp=reading_ts,
                     kafka_partition=partition,
                     kafka_offset=offset
@@ -303,9 +269,9 @@ def message_handler(app: Flask):
                 
                 db.session.add(record)
                 
-                # --- STEP 2: Generate LLM Summary for Critical readings ---
+                # --- STEP 3: Generate LLM Summary for Critical readings ---
                 llm_summary = None
-                if data['state_classified'] == 'Critical':
+                if data.get('state_classified') == 'Critical':
                     llm_summary = generate_critical_summary(data, reading_ts)
                     db.session.add(llm_summary)
                     
@@ -316,14 +282,26 @@ def message_handler(app: Flask):
                         f"Temp={data['vitals']['temperature']}"
                     )
                 
-                # --- STEP 3: Commit database transaction ---
+                # --- STEP 4: Commit database transaction ---
                 db.session.commit()
                 logger.debug(
                     f"✓ Persisted vital record for {data['patient_id']} "
                     f"[partition={partition}, offset={offset}]"
                 )
                 
-                # --- STEP 4: Commit Kafka offset ONLY after DB success ---
+                # --- STEP 5: Emit Real-Time Event ---
+                # Emit to specific patient room
+                try:
+                    socketio.emit(
+                        f'new_vitals_{patient_id}', 
+                        record.to_dict(), 
+                        room=patient_id
+                    )
+                    logger.debug(f"Emitted socket event for {patient_id}")
+                except Exception as e:
+                    logger.error(f"Socket emit failed: {e}")
+
+                # --- STEP 6: Commit Kafka offset ONLY after DB success ---
                 if not commit_fn():
                     logger.error(
                         f"DB write succeeded but Kafka commit failed for "
@@ -489,6 +467,16 @@ def generate_critical_summary(data: dict, reading_ts: datetime) -> LLMSummary:
             model_version='LLM_API_ERROR'
         )
 
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection and room joining."""
+    patient_id = request.args.get('patientId')
+    if patient_id:
+        join_room(patient_id)
+        logger.info(f"Client connected: {request.sid} joined room {patient_id}")
+    else:
+        logger.warning(f"Client connected without patientId: {request.sid}")
+
 
 def run_consumer(app: Flask) -> None:
     """
@@ -518,6 +506,9 @@ def run_consumer(app: Flask) -> None:
 if __name__ == '__main__':
     app = create_app()
     
+    # Initialize SocketIO with the Flask app
+    socketio.init_app(app)
+
     # Create database tables
     with app.app_context():
         db.create_all()
@@ -525,5 +516,6 @@ if __name__ == '__main__':
     # Start Kafka consumer in background
     run_consumer(app)
     
-    # Run Flask server
-    app.run(debug=True, host='0.0.0.0', port=5001, use_reloader=False)
+    # Use socketio.run instead of app.run
+    logger.info("Starting Flask-SocketIO server on port 5000")
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False, use_reloader=False)

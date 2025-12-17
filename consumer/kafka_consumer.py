@@ -1,15 +1,10 @@
-"""
-Kafka Consumer with robust error handling and manual offset commits.
 
-Subscribes to the vitals topic and persists messages to PostgreSQL.
-Handles common Kafka exceptions gracefully.
-Implements At-Least-Once processing via manual offset commits.
-"""
 import json
+import os
+import sys
+import time
 import logging
-from datetime import datetime
-from typing import Optional, Callable
-from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition
+from consumer.app import create_app, message_handler
 
 # Configure logging
 logging.basicConfig(
@@ -18,268 +13,92 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def process_static_data():
+    """
+    Reads validation_data.json and processes records via the existing message handler.
+    """
+    json_path = os.path.join(os.path.dirname(__file__), 'validation_data.json')
+    logger.info(f"📂 Loading static validation data from: {json_path}")
 
-class VitalsConsumer:
-    """
-    Kafka Consumer for patient vital signs.
+    if not os.path.exists(json_path):
+        logger.error("❌ Validation file not found!")
+        return
+
+    try:
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+    except Exception as e:
+        logger.error(f"❌ Failed to load JSON: {e}")
+        return
+
+    logger.info(f"🔎 Found {len(data)} records. Starting processing...")
     
-    Provides robust error handling for common Kafka issues including:
-    - Partition EOF
-    - Broker connectivity issues
-    - Message decoding errors
-    
-    Implements At-Least-Once delivery via manual offset commits.
-    Offsets are only committed after successful processing.
-    """
-    
-    def __init__(
-        self,
-        bootstrap_servers: str = 'localhost:9093',
-        group_id: str = 'vitals-consumer-group',
-        topic: str = 'vitals',
-        auto_offset_reset: str = 'earliest'
-    ):
-        """
-        Initialize the Kafka consumer.
-        
-        Args:
-            bootstrap_servers: Kafka broker addresses.
-            group_id: Consumer group ID.
-            topic: Topic to subscribe to.
-            auto_offset_reset: Where to start reading ('earliest' or 'latest').
-        """
-        self.topic = topic
-        self.config = {
-            'bootstrap.servers': bootstrap_servers,
-            'group.id': group_id,
-            'auto.offset.reset': auto_offset_reset,
-            # MANUAL COMMIT: Disable auto-commit for At-Least-Once processing
-            'enable.auto.commit': False,
-            'session.timeout.ms': 30000,
-            'max.poll.interval.ms': 300000,
-        }
-        
-        self.consumer: Optional[Consumer] = None
-        self.running = False
-        
-    def connect(self) -> bool:
-        """
-        Connect to Kafka and subscribe to the topic.
-        
-        Returns:
-            True if connection successful, False otherwise.
-        """
-        try:
-            self.consumer = Consumer(self.config)
-            self.consumer.subscribe([self.topic])
-            logger.info(f"✓ Connected to Kafka and subscribed to '{self.topic}'")
-            logger.info("📍 Manual commit mode enabled (At-Least-Once processing)")
-            return True
-        except KafkaException as e:
-            logger.error(f"✗ Failed to connect to Kafka: {e}")
-            return False
-    
-    def commit_offset(self, msg) -> bool:
-        """
-        Manually commit the offset for a processed message.
-        
-        This should only be called after successful processing
-        (e.g., after database writes are confirmed).
-        
-        Args:
-            msg: The Kafka message whose offset should be committed.
-            
-        Returns:
-            True if commit successful, False otherwise.
-        """
-        if not self.consumer:
-            logger.error("Cannot commit: consumer not connected")
-            return False
-            
-        try:
-            # Commit the offset of the next message (current offset + 1)
-            self.consumer.commit(message=msg, asynchronous=False)
-            logger.debug(
-                f"✓ Committed offset {msg.offset() + 1} "
-                f"for partition {msg.partition()}"
-            )
-            return True
-        except KafkaException as e:
-            logger.error(f"Failed to commit offset: {e}")
-            return False
-    
-    def _decode_message(self, msg) -> Optional[dict]:
-        """
-        Decode a Kafka message with error handling.
-        
-        Args:
-            msg: Raw Kafka message.
-            
-        Returns:
-            Decoded message dictionary or None if decoding fails.
-        """
-        try:
-            value = msg.value()
-            if value is None:
-                logger.warning("Received message with null value")
-                return None
-            
-            return json.loads(value.decode('utf-8'))
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {e} - Raw value: {msg.value()[:100]}")
-            return None
-        except UnicodeDecodeError as e:
-            logger.error(f"Unicode decode error: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected decode error: {e}")
-            return None
-    
-    def _handle_kafka_error(self, error: KafkaError) -> bool:
-        """
-        Handle Kafka errors with appropriate responses.
-        
-        Args:
-            error: KafkaError from message poll.
-            
-        Returns:
-            True if error is recoverable, False if should stop.
-        """
-        error_code = error.code()
-        
-        # Partition EOF - normal condition, not an error
-        if error_code == KafkaError._PARTITION_EOF:
-            logger.debug(f"Reached end of partition (normal)")
-            return True
-        
-        # All brokers down - critical but may recover
-        if error_code == KafkaError._ALL_BROKERS_DOWN:
-            logger.error("All Kafka brokers are down - will retry")
-            return True
-        
-        # Transport failure
-        if error_code == KafkaError._TRANSPORT:
-            logger.error(f"Kafka transport error: {error.str()}")
-            return True
-        
-        # Timed out
-        if error_code == KafkaError._TIMED_OUT:
-            logger.warning("Kafka operation timed out")
-            return True
-        
-        # Unknown topic or partition
-        if error_code == KafkaError.UNKNOWN_TOPIC_OR_PART:
-            logger.error(f"Unknown topic or partition: {error.str()}")
-            return True
-        
-        # Fatal errors
-        if error.code() == KafkaError._FATAL:
-            logger.critical(f"Fatal Kafka error: {error.str()}")
-            return False
-        
-        # Other errors
-        logger.error(f"Kafka error [{error_code}]: {error.str()}")
+    # Initialize Flask App context
+    app = create_app()
+    handler = message_handler(app)
+
+    # Dummy commit function (always succeeds)
+    def dummy_commit():
         return True
-    
-    def consume(
-        self,
-        message_handler: Callable[[dict, int, int, Callable[[], bool]], bool],
-        poll_timeout: float = 1.0
-    ) -> None:
-        """
-        Start consuming messages in a loop with manual offset commits.
+
+    success_count = 0
+    fail_count = 0
+
+    for i, record in enumerate(data):
+        logger.info(f"Processing Record {i+1}/{len(data)}: Patient {record['patient_id']}")
+
+        # TRANSFORM: Flat JSON -> Nested Structure expected by app.py
+        # Logic to match Producer's structure
         
-        Args:
-            message_handler: Callback function(message_dict, partition, offset, commit_fn).
-                             The handler receives a commit function that should be called
-                             after successful processing. Returns True if processing succeeded.
-            poll_timeout: Seconds to wait for messages.
-        """
-        if not self.consumer:
-            if not self.connect():
-                raise RuntimeError("Failed to connect to Kafka")
-        
-        self.running = True
-        logger.info("🚀 Starting Kafka consumer loop (manual commit mode)...")
-        
-        messages_consumed = 0
-        messages_committed = 0
-        errors_encountered = 0
-        
+        # Simple classification based on thresholds
+        hr = record.get('heart_rate', 0)
+        spo2 = record.get('spo2', 100)
+        state = 'Normal'
+        if hr < 50 or hr > 130 or spo2 < 90:
+            state = 'Critical'
+            logger.warning(f"⚠️ Classified as CRITICAL: HR={hr}, SpO2={spo2}")
+
+        nested_data = {
+            'patient_id': record['patient_id'],
+            'timestamp': record['timestamp'],
+            'device_id': 'static-validation-file',
+            'vitals': {
+                'heart_rate': hr,
+                'spo2': spo2,
+                'temperature': record.get('body_temp', 37.0)
+            },
+            'state_classified': state
+        }
+
+        # Process
         try:
-            while self.running:
-                msg = self.consumer.poll(timeout=poll_timeout)
-                
-                if msg is None:
-                    continue
-                
-                if msg.error():
-                    errors_encountered += 1
-                    if not self._handle_kafka_error(msg.error()):
-                        logger.critical("Unrecoverable error - stopping consumer")
-                        break
-                    continue
-                
-                # Decode message
-                data = self._decode_message(msg)
-                if data is None:
-                    errors_encountered += 1
-                    # Still commit for decode failures to avoid infinite retry
-                    self.commit_offset(msg)
-                    continue
-                
-                # Create commit callback for this message
-                def create_commit_callback(message):
-                    def commit_callback() -> bool:
-                        return self.commit_offset(message)
-                    return commit_callback
-                
-                # Call message handler with commit callback
-                try:
-                    success = message_handler(
-                        data, 
-                        msg.partition(), 
-                        msg.offset(),
-                        create_commit_callback(msg)
-                    )
-                    
-                    if success:
-                        messages_consumed += 1
-                        messages_committed += 1
-                    else:
-                        # Handler returned False - processing failed, don't commit
-                        errors_encountered += 1
-                        logger.warning(
-                            f"Handler failed for message at partition {msg.partition()}, "
-                            f"offset {msg.offset()} - will be reprocessed"
-                        )
-                    
-                    if messages_consumed % 100 == 0 and messages_consumed > 0:
-                        logger.info(
-                            f"Consumed {messages_consumed} messages, "
-                            f"Committed {messages_committed}"
-                        )
-                        
-                except Exception as e:
-                    logger.error(f"Handler error: {e}")
-                    errors_encountered += 1
-                    # Don't commit on exception - message will be reprocessed
-                    
-        except KeyboardInterrupt:
-            logger.info("Received shutdown signal")
-        finally:
-            self.stop()
-            logger.info(
-                f"Consumer stopped. Consumed: {messages_consumed}, "
-                f"Committed: {messages_committed}, Errors: {errors_encountered}"
+            # We pass a dummy callback for commit_fn
+            processed = handler(
+                data=nested_data, 
+                partition=0, 
+                offset=i, 
+                commit_fn=dummy_commit
             )
+            
+            if processed:
+                success_count += 1
+                logger.info(f"✅ Record {i+1} processed successfully")
+            else:
+                fail_count += 1
+                logger.error(f"❌ Record {i+1} failed processing")
+                
+        except Exception as e:
+            logger.error(f"💥 Exception processing record {i+1}: {e}")
+            fail_count += 1
+
+    logger.info("-" * 40)
+    logger.info("🏁 Static Validation Complete")
+    logger.info(f"Summary: {success_count} Succeeded, {fail_count} Failed")
+    logger.info("Keeping container alive for inspection... (Ctrl+C to exit)")
     
-    def stop(self) -> None:
-        """Stop the consumer and close connections."""
-        self.running = False
-        if self.consumer:
-            try:
-                self.consumer.close()
-                logger.info("✓ Consumer closed cleanly")
-            except Exception as e:
-                logger.error(f"Error closing consumer: {e}")
+    # Keep alive so we can inspect logs without container restarting loop
+    while True:
+        time.sleep(10)
+
+if __name__ == "__main__":
+    process_static_data()

@@ -1,0 +1,92 @@
+[
+    {
+        "patient_id": "1001",
+        "timestamp": "2025-12-17T01:20:00Z",
+        "heart_rate": 72,
+        "spo2": 98,
+        "body_temp": 37.0,
+        "systolic_bp": 120,
+        "diastolic_bp": 80
+    },
+    {
+        "patient_id": "1001",
+        "timestamp": "2025-12-17T01:21:00Z",
+        "heart_rate": 75,
+        "spo2": 97,
+        "body_temp": 37.1,
+        "systolic_bp": 122,
+        "diastolic_bp": 82
+    },
+    {
+        "patient_id": "1001",
+        "timestamp": "2025-12-17T01:22:00Z",
+        "heart_rate": 70,
+        "spo2": 99,
+        "body_temp": 36.9,
+        "systolic_bp": 118,
+        "diastolic_bp": 78
+    },
+    {
+        "patient_id": "1001",
+        "timestamp": "2025-12-17T01:23:00Z",
+        "heart_rate": 78,
+        "spo2": 98,
+        "body_temp": 37.2,
+        "systolic_bp": 125,
+        "diastolic_bp": 84
+    },
+    {
+        "patient_id": "1001",
+        "timestamp": "2025-12-17T01:24:00Z",
+        "heart_rate": 74,
+        "spo2": 96,
+        "body_temp": 37.0,
+        "systolic_bp": 121,
+        "diastolic_bp": 81
+    },
+    {
+        "patient_id": "1001",
+        "timestamp": "2025-12-17T01:25:00Z",
+        "heart_rate": 76,
+        "spo2": 97,
+        "body_temp": 37.1,
+        "systolic_bp": 123,
+        "diastolic_bp": 83
+    },
+    {
+        "patient_id": "1001",
+        "timestamp": "2025-12-17T01:26:00Z",
+        "heart_rate": 71,
+        "spo2": 98,
+        "body_temp": 37.0,
+        "systolic_bp": 119,
+        "diastolic_bp": 79
+    },
+    {
+        "patient_id": "1003",
+        "timestamp": "2025-12-17T01:27:00Z",
+        "heart_rate": 45,
+        "spo2": 92,
+        "body_temp": 36.5,
+        "systolic_bp": 90,
+        "diastolic_bp": 60
+    },
+    {
+        "patient_id": "1003",
+        "timestamp": "2025-12-17T01:27:30Z",
+        "heart_rate": 48,
+        "spo2": 91,
+        "body_temp": 36.4,
+        "systolic_bp": 88,
+        "diastolic_bp": 58
+    },
+    {
+        "patient_id": "1003",
+        "timestamp": "2025-12-17T01:28:00Z",
+        "heart_rate": 42,
+        "spo2": 90,
+        "body_temp": 36.3,
+        "systolic_bp": 85,
+        "diastolic_bp": 55
+    }
+]

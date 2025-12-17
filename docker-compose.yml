@@ -77,7 +77,10 @@ services:
       DATABASE_URL: postgresql://rpm_user:rpm_password@postgres:5432/rpm_db
       GEMINI_API_KEY: ${GEMINI_API_KEY}
     ports:
-      - "5001:5001"
+      - "5001:5000"
+    volumes:
+      - ./consumer/validation_data.json:/app/consumer/validation_data.json
+    command: [ "python", "-m", "consumer.app" ]
 
   producer:
     build:
