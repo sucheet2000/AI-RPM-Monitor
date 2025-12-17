@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom font styles for a professional look */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #0f172a;
+  /* dark-bg */
+  color: #f8fafc;
+  /* light text */
+}
+
+/* Base style for the syntax highlighting block */
+.syntax-highlighter-block {
+  overflow-x: auto;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  background-color: #1a202c;
+  /* slightly lighter than dark-bg */
+  font-size: 0.85rem;
+}
