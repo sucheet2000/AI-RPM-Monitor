@@ -62,5 +62,54 @@ services:
         echo 'Topic vitals created successfully!'
       "
 
+  consumer:
+    build:
+      context: .
+      dockerfile: consumer/Dockerfile
+    container_name: rpm-consumer
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      DATABASE_URL: postgresql://rpm_user:rpm_password@postgres:5432/rpm_db
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    ports:
+      - "5001:5001"
+
+  producer:
+    build:
+      context: .
+      dockerfile: consumer/Dockerfile
+    container_name: rpm-producer
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    command: [ "python", "vitals_producer.py" ]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rpm-frontend
+    depends_on:
+      - consumer
+    ports:
+      - "3000:3000"
+    environment:
+      # React App connects to localhost from the browser, BUT in Docker logic...
+      # Wait, React runs in the browser. The browser is on the host. 
+      # So it needs to talk to localhost:5001 (which is mapped from consumer container).
+      # If we used Nginx reverse proxy, it would differ. 
+      # For standard CRA 'npm start', it runs a dev server in the container.
+      # We need to ensure it binds to 0.0.0.0
+      HOST: "0.0.0.0"
+    stdin_open: true # Needed for React scripts to not exit immediately
+    tty: true
+
 volumes:
   postgres_data:

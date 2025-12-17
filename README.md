@@ -54,45 +54,19 @@ AI-RPM Monitor simulates a real-world remote patient monitoring scenario:
 ---
 
 ## 🚀 Quick Start
+## 🚀 Deployment
+
+The entire system (Infrastructure + Backend + Frontend + Data Producer) is containerized with Docker.
 
 ### Prerequisites
 
 -   **Docker & Docker Compose** (v2.0+)
--   **Python 3.9+**
--   **Node.js 18+** (for frontend)
 -   **Gemini API Key** (for AI Triage)
 
-### 1. Clone and Setup
-
-```bash
-git clone <repository-url>
-cd AI-RPM-Monitor
-```
-
-### 2. Configure Environment
-
-Create a `.env` file for your API key:
+### 1. Configure Environment
 
 ```bash
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY
-```
-
-### 3. Start Infrastructure (Docker)
-
-Start PostgreSQL, Kafka, and Zookeeper:
-
-```bash
-docker-compose up -d
-```
-
-Expected output:
-```
-NAME              STATUS          PORTS
-rpm-kafka         running         0.0.0.0:9092->9092/tcp
-rpm-postgres      running         0.0.0.0:5432->5432/tcp
-rpm-zookeeper     running         0.0.0.0:2181->2181/tcp
-rpm-kafka-init    exited (0)      # Creates 'vitals' topic
 ```
 
 ### 4. Start the Application Services
