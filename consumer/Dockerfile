@@ -18,6 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY consumer/ consumer/
+COPY tests/ tests/
+COPY edge_classifier.py .
 
 # Expose port
 EXPOSE 5001
